@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or how-to
+    url: https://github.com/ZHLX2005/sql-harness/discussions
+    about: Ask in Discussions, not Issues.

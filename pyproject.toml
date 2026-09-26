@@ -1,0 +1,77 @@
+[project]
+name = "sql-harness"
+version = "0.3.7"
+description = "Single-process SQL + SSH CLI for LLM agents. PostgreSQL/MySQL/SSH via SQLAlchemy + paramiko. Plaintext credentials in one TOML file. Helpers auto-injected into the heredoc namespace."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [
+    { name = "zhaoliuxue" },
+]
+requires-python = ">=3.12"
+keywords = ["sql", "postgres", "mysql", "ssh", "agent", "cli", "database", "heredoc"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Database",
+    "Topic :: System :: Shells",
+]
+
+dependencies = [
+    "psycopg[binary]>=3.2,<4",
+    "pymysql>=1.1,<2",
+    "sqlalchemy>=2.0,<3",
+    "paramiko>=3.4,<4",
+    "markdown-it-py>=3,<4",
+    "redis>=5.0,<6",
+]
+
+[project.scripts]
+sql-harness = "sql_harness.run:main"
+
+[project.urls]
+"Source" = "https://github.com/ZHLX2005/sql-harness"
+"Issues" = "https://github.com/ZHLX2005/sql-harness/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[[tool.uv.index]]
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+default = true
+
+[tool.hatch.build.targets.wheel]
+# Mirrors browser-harness's setuptools src-layout. The package source is
+# under `src/sql_harness/`; the package name (top-level import) is `sql_harness`.
+packages = ["src/sql_harness"]
+
+[tool.hatch.build.targets.wheel.force-include]
+# Bundle the full skill docs into the wheel so `sql-harness skill install`
+# can materialize them to the user's ~/.claude/skills/sql-harness/ (or
+# ~/.codex/skills/...) without needing the git repo. Mirrors browser-harness
+# shipping its SKILL.md in the wheel, but extended to the whole doc bundle.
+# Paths are relative to this pyproject.toml (repo root).
+# NOTE: README.md is deliberately NOT here — it's the PyPI landing page for
+# humans, not agent runtime docs. docs/ was removed entirely (2026-09).
+"SKILL.md" = "sql_harness/_skills/SKILL.md"
+"interaction-skills" = "sql_harness/_skills/interaction-skills"
+"agent-workspace/zones/meta/skills" = "sql_harness/_skills/zones-meta-skills"
+
+[tool.pytest.ini_options]
+# Mirrors browser-harness's `pythonpath = ["src"]` — tests import `sql_harness`
+# directly from the src tree without relying on the editable install.
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.uv]
+# Standalone project: `uv sync` at the repo root produces a clean venv with
+# only the deps above.
+package = true
+
+[dependency-groups]
+# dev-only: tooling for the sql-harness project itself (CI, dev installs).
+# Users installing sql-harness from PyPI do NOT get pytest (it's a runtime CLI).
+dev = ["pytest>=8"]
