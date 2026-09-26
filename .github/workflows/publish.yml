@@ -60,8 +60,11 @@ jobs:
           VER=$(grep -E '^version = ' pyproject.toml | sed -E 's/^version = "([^"]+)"/\1/')
           uv tool install "dist/sql_harness-$VER-py3-none-any.whl"
           sql-harness version
-          # Heredoc mode — the primary agent-facing entry point.
-          echo 'print(list_tables() == [] or "helper-ns ok")' | sql-harness
+          # Heredoc mode — the primary agent-facing entry point. Verify the
+          # helpers are pre-imported into the exec namespace (no DB needed:
+          # CI has no connections.toml, so anything touching a workspace
+          # would fail by design).
+          echo 'assert callable(query) and callable(use_workspace); print("heredoc helpers ok")' | sql-harness
           uv tool uninstall sql-harness
 
       - name: Publish to PyPI
