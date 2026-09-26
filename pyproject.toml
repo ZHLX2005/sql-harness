@@ -1,6 +1,6 @@
 [project]
 name = "sql-harness"
-version = "0.3.7"
+version = "0.3.8"
 description = "Single-process SQL + SSH CLI for LLM agents. PostgreSQL/MySQL/SSH via SQLAlchemy + paramiko. Plaintext credentials in one TOML file. Helpers auto-injected into the heredoc namespace."
 readme = "README.md"
 license = { text = "MIT" }
