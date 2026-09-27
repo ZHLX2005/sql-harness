@@ -26,6 +26,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import tomllib
 from dataclasses import dataclass, field
@@ -34,8 +35,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
-
-from markdown_it import MarkdownIt
 
 from . import __version__
 from .config import (
@@ -57,7 +56,30 @@ EDITABLE_SUFFIXES = (".md", ".py", ".toml")
 # (or just `name` — extension is filled in if missing for `md`/`py`).
 CREATE_KINDS = {"md", "py", "toml"}
 
-ASSETS = ("index.html", "app.css", "app.js")
+# Whitelist for static assets served under /static/.
+#
+# Layout on disk (sql_harness/_web_assets/):
+#   index.html
+#   index-<hash>.js
+#   index-<hash>.css
+#   Editor-<hash>.js             ← lazy-loaded editor chunk
+#
+# Rules:
+#   - `index.html` is matched exactly (never nested).
+#   - Anything else must be a hashed chunk (`<name>-<hash>.<ext>` where name
+#     is alphanumeric and hash is alphanumeric). The hash is the canonical
+#     integrity check; the name encodes the entry point. This is the same
+#     shape Vite emits, so we don't have to enumerate builds.
+#   - Anything else returns 404.
+#
+# Hashed chunks carry `Cache-Control: max-age=31536000, immutable` because
+# their name encodes their content; the SPA shell stays `no-store` so a new
+# build busts the cache automatically.
+ASSETS_INDEX = "index.html"
+# Vite emits `name-<hash>.<ext>`; accept that exact shape and reject
+# arbitrary nested paths. The hash pattern is Vite's default (alphanumerics
+# + dash, 8+ chars).
+_HASSHED_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*-[A-Za-z0-9_-]{8,}\.[a-z]+$")
 
 # Names accepted in the Host / Origin headers. The whole security story assumes
 # loopback; `--host` widens this set (see make_server).
@@ -440,20 +462,12 @@ def resolve_rename_target(root: DocRoot, src: str, new_rel: str) -> tuple[Path, 
     return src_abs, dst_abs
 
 
-# --- Rendering ------------------------------------------------------------- #
-
-def _markdown() -> MarkdownIt:
-    # html=False is a security control, not a style choice: these docs are
-    # written by agents (`save`, `apply_skill`), and raw HTML would make them
-    # stored XSS on an origin that can write files.
-    md = MarkdownIt("commonmark", {"html": False, "linkify": False})
-    md.enable("table").enable("strikethrough")
-    return md
-
-
-def render_markdown(text: str) -> str:
-    return _markdown().render(text)
-
+# --- Frontmatter parsing -------------------------------------------------- #
+#
+# Markdown *rendering* moved to the client (react-markdown + remark-gfm in
+# the React SPA) — the legacy markdown-it-py dependency was removed.
+# Frontmatter parsing stays server-side so the doc header can show name /
+# description without the client re-parsing it.
 
 def split_frontmatter(text: str) -> tuple[dict[str, str], str]:
     """Split a leading `---` block off the body.
@@ -739,11 +753,18 @@ class DocHandler(BaseHTTPRequestHandler):
     def _roots(self) -> list[DocRoot]:
         return build_roots()
 
-    def _send(self, status: int, body: bytes, ctype: str, extra: dict | None = None) -> None:
+    def _send(
+        self,
+        status: int,
+        body: bytes,
+        ctype: str,
+        extra: dict | None = None,
+        cache_control: str = "no-store",
+    ) -> None:
         self.send_response(status)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", cache_control)
         self.send_header("X-Content-Type-Options", "nosniff")
         for key, value in (extra or {}).items():
             self.send_header(key, value)
@@ -895,14 +916,27 @@ class DocHandler(BaseHTTPRequestHandler):
             self._json(500, {"error": f"{type(exc).__name__}: {exc}", "code": "internal"})
 
     def _serve_asset(self, name: str, ctype: str | None) -> None:
-        # Exact-name whitelist — a joined path would be a traversal bug.
-        if name not in ASSETS:
+        # Whitelist: index.html exactly, or any hashed chunk (`name-hash.ext`).
+        # Reject traversal (no `..`, no leading `/`) before resolving.
+        if not name or ".." in name.split("/") or name.startswith("/"):
             raise NotFound(name)
+        if name == ASSETS_INDEX:
+            cache = "no-store"
+            target = name
+        elif "/" not in name and _HASSHED_RE.match(name):
+            cache = "max-age=31536000, immutable"
+            target = name
+        else:
+            raise NotFound(name)
+
         from importlib import resources as importlib_resources
 
         try:
-            ref = importlib_resources.files("sql_harness").joinpath("_web", name)
-            body = ref.read_bytes()
+            body = (
+                importlib_resources.files("sql_harness")
+                .joinpath("_web_assets", target)
+                .read_bytes()
+            )
         except (ModuleNotFoundError, FileNotFoundError, OSError):
             raise NotFound(f"asset {name} is not bundled")
         if ctype is None:
@@ -912,7 +946,7 @@ class DocHandler(BaseHTTPRequestHandler):
                 ".html": "text/html; charset=utf-8",
             }.get(Path(name).suffix, "application/octet-stream")
         extra = {"Content-Security-Policy": CSP} if ctype.startswith("text/html") else None
-        self._send(200, body, ctype, extra)
+        self._send(200, body, ctype, extra, cache_control=cache)
 
     # -- /api/doc (read) -------------------------------------------------- #
 
@@ -935,7 +969,10 @@ class DocHandler(BaseHTTPRequestHandler):
             "path": rel or target.name,
             "abs": str(target),
             "raw": raw,
-            "html": render_markdown(raw) if kind == "md" else None,
+            # `html` removed (PR2 of the React rewrite): the SPA renders
+            # markdown client-side via react-markdown. Kept here for one
+            # release as a no-op so any older wheel-built UI keeps working.
+            "html": None,
             "frontmatter": split_frontmatter(raw)[0] if kind == "md" else {},
             "kind": kind,
             "editable": root.editable and kind != "other",

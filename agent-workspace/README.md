@@ -12,9 +12,9 @@ sessions. The live runtime copies live in `$BH_SQL_AGENT_WORKSPACE` (default
   PostgreSQL. Generated via `sql-harness save sh_demo_crud`. Idempotent (drops
   + recreates the `sh_demo` schema each run). Re-run with
     `sql-harness run sh_demo_crud`.
-- `agent_helpers.py` — reusable helpers (`seed_users`, `place_order`,
-  `ship_pending_orders`, `list_orders`, `user_by_email`, `product_by_sku`)
-  auto-imported into the heredoc/run namespace.
+- `agent_helpers.py` — reusable task-specific helpers auto-imported into
+  the heredoc/run namespace. Empty by default (the loader tolerates a
+  missing file); extend it as you discover repeated patterns.
 - `skills/sh_demo-schema.md` — schema knowledge the agent captured for reuse.
 
 ## How this code was produced

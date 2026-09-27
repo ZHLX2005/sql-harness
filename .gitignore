@@ -32,3 +32,18 @@ Thumbs.db
 # Secrets (the connections.toml at runtime can have real DSNs; never commit)
 .env
 *.env.local
+
+# ============================================================
+# Web SPA (React + Vite) — built artifacts + tooling
+# ============================================================
+# npm deps — never committed (run `cd web && npm ci`)
+web/node_modules/
+
+# Vite build output lives under the Python package so webapp._serve_asset
+# can load it via importlib.resources at runtime. It is regenerated from the
+# web/ sources on every build (locally, or in CI before `uv build`), so the
+# WHOLE directory is ignored — hashed bundles committed to git would go stale
+# and break the release flow. The hatchling force-include picks the files up
+# from disk at wheel-build time; it never reads them from git.
+src/sql_harness/_web_assets/
+node_modules

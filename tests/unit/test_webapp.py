@@ -250,23 +250,10 @@ def test_tree_depth_cap(workspace: Path) -> None:
     assert depth(W.build_tree(workspace)) <= W._DEPTH_CAP + 1
 
 
-# --- rendering ------------------------------------------------------------- #
-
-def test_render_markdown_basic() -> None:
-    assert "<h1>" in W.render_markdown("# Title\n")
-
-
-def test_render_table_enabled() -> None:
-    html = W.render_markdown("| a | b |\n|---|---|\n| 1 | 2 |\n")
-    assert "<table>" in html and "<th>a</th>" in html
-
-
-def test_render_escapes_raw_html() -> None:
-    """Stored-XSS regression: docs are written by agents, so raw HTML must be
-    escaped rather than passed through."""
-    html = W.render_markdown("<script>alert(1)</script>")
-    assert "&lt;script&gt;" in html and "<script>" not in html
-
+# --- frontmatter parsing -------------------------------------------------- #
+# (markdown rendering moved to the React client in PR2 of the React rewrite;
+# the server still parses frontmatter so the doc header can show name /
+# description without the client needing to do it again.)
 
 def test_split_frontmatter_parses_keys() -> None:
     meta, body = W.split_frontmatter('---\nname: x\ndescription: "a b"\n---\n# Body\n')
@@ -296,18 +283,6 @@ def test_split_frontmatter_keeps_non_kv_lines() -> None:
     assert "just a stray line" in meta["_raw"]
 
 
-def test_render_real_skill_md() -> None:
-    """Guard against diverging from the real corpus."""
-    skill = next(r for r in W.build_roots() if r.id == "skill")
-    raw = skill.base.read_text(encoding="utf-8")
-    meta, body = W.split_frontmatter(raw)
-    assert meta.get("name") == "sql-harness"
-    assert "description" in meta
-    html = W.render_markdown(body)
-    assert "<h1>" in html
-    assert "name: sql-harness" not in html  # frontmatter stripped from the body
-
-
 # --- HTTP ------------------------------------------------------------------ #
 
 def test_http_index_served(server: str) -> None:
@@ -323,14 +298,47 @@ def test_http_index_sets_csp(server: str) -> None:
 
 
 def test_http_static_asset(server: str) -> None:
-    status, headers, body = _get(server + "/static/app.css")
+    # PR2: Vite emits hashed JS/CSS/Editor chunks directly in `_web_assets/`.
+    # The exact hash changes every build, so we read the bundled directory to
+    # find one instead of hard-coding the name. Whitelist + traversal
+    # rejection tests below still cover the security guard.
+    from importlib import resources as importlib_resources
+
+    assets_root = importlib_resources.files("sql_harness").joinpath("_web_assets")
+    css_files = [
+        f.name for f in assets_root.iterdir() if f.name.endswith(".css")
+    ] if assets_root.is_dir() else []
+    assert css_files, "expected at least one built CSS file"
+    asset = css_files[0]
+    status, headers, body = _get(f"{server}/static/{asset}")
     assert status == 200 and headers["Content-Type"].startswith("text/css") and body
 
 
 def test_http_static_whitelist_rejects_other_names(server: str) -> None:
-    for name in ["../cli.py", "cli.py", "..%2fcli.py"]:
+    # Legacy name list (no longer whitelisted) and arbitrary nested paths must 404.
+    # `index.html` is on the whitelist so it serves; traversal attacks still 404.
+    for name in ["../cli.py", "cli.py", "..%2fcli.py", "app.css", "app.js"]:
         status, _, _ = _get(f"{server}/static/{name}")
         assert status == 404, name
+    # Nested paths and traversal segments are blocked even when the rest looks valid.
+    for name in ["etc/passwd", "foo/bar.css", "../assets/x.js", "x.js", "index"]:
+        status, _, _ = _get(f"{server}/static/{name}")
+        assert status == 404, name
+
+
+def test_http_static_hashed_asset_has_immutable_cache(server: str) -> None:
+    """Hashed chunks must be marked Cache-Control: immutable."""
+    from importlib import resources as importlib_resources
+
+    assets_root = importlib_resources.files("sql_harness").joinpath("_web_assets")
+    if not assets_root.is_dir():
+        return  # no build yet — skip
+    css_files = [str(f.name) for f in assets_root.iterdir() if f.name.endswith(".css")]
+    if not css_files:
+        return
+    _, headers, _ = _get(f"{server}/static/{css_files[0]}")
+    cc = headers.get("Cache-Control", "")
+    assert "immutable" in cc, cc
 
 
 def test_http_health(server: str) -> None:
@@ -346,12 +354,15 @@ def test_http_tree_lists_zone(server: str) -> None:
     assert roots["zone:alpha"]["file_count"] >= 2
 
 
-def test_http_doc_returns_raw_and_html(server: str) -> None:
+def test_http_doc_returns_raw_and_frontmatter(server: str) -> None:
+    # PR2 of the React rewrite moved markdown rendering to the client (react-markdown).
+    # The backend still returns `raw` + `frontmatter` + `sha256`; the `html`
+    # field is preserved for back-compat but is now always null.
     status, _, body = _get(server + "/api/doc?root=zone:alpha&path=skills/note.md")
     doc = _json_body(body)
     assert status == 200
     assert doc["raw"] == "# note\n"
-    assert "<h1>note</h1>" in doc["html"]
+    assert doc["html"] is None  # client renders markdown now
     assert doc["editable"] is True
     assert len(doc["sha256"]) == 64
 

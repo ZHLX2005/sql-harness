@@ -4,10 +4,12 @@
 # explicitly, see the push step below). Also runnable manually from the
 # Actions tab.
 #
-# Flow: tag → test → build → local wheel smoke test → publish to PyPI
-#       → verify the exact version is live on pypi.org.
+# Flow: tag → setup Node + Python → build the SPA (npm ci && npm run build,
+#        regenerating src/sql_harness/_web_assets/) → test → wheel build →
+#        local smoke test → publish to PyPI → verify the exact version is live
+#        on pypi.org.
 #
-# The release itself is NOT automated-bumped here (unlike the old monorepo
+# The release itself is NOT auto-bumped here (unlike the old monorepo
 # `v-sqlharness:` commit-prefix flow): the maintainer bumps `version` in
 # pyproject.toml, commits, then `git tag vX.Y.Z && git push origin vX.Y.Z`.
 # Explicit is safer than auto-bump for a standalone repo.
@@ -32,8 +34,23 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
       - name: Install uv
         run: pip install uv
+
+      - name: Build the SPA (Vite output → src/sql_harness/_web_assets/)
+        run: |
+          cd web
+          npm ci
+          npm run build
+        # vite.config.ts writes the production bundle directly into the
+        # Python package's _web_assets/ dir; `emptyOutDir: true` wipes any
+        # stale local artifacts before writing fresh ones. This step MUST
+        # run before `uv build` so the force-include paths exist on disk.
 
       - name: Guard — version matches tag
         if: startsWith(github.ref, 'refs/tags/')
@@ -54,6 +71,18 @@ jobs:
       - name: Build wheel and sdist
         run: rm -rf dist && uv build
 
+      - name: Verify wheel bundles the SPA
+        run: |
+          set -e
+          python -c "
+          import zipfile
+          with zipfile.ZipFile('dist/sql_harness-$(grep -E '^version = ' pyproject.toml | sed -E 's/^version = \"([^\"]+)\"/\1/')-py3-none-any.whl') as z:
+              names = z.namelist()
+              assert any(n.startswith('sql_harness/_web_assets/') for n in names), names
+              assert any(n.startswith('sql_harness/_web_assets/assets/') for n in names), names
+              print('wheel bundle OK, _web_assets present')
+          "
+
       - name: Smoke test the wheel (install as a user would)
         run: |
           set -e
@@ -65,6 +94,18 @@ jobs:
           # CI has no connections.toml, so anything touching a workspace
           # would fail by design).
           echo 'assert callable(query) and callable(use_workspace); print("heredoc helpers ok")' | sql-harness
+          # Boot the web server briefly and confirm the React SPA loads end
+          # to end (HTML + hashed JS/CSS). Loopback-only is fine on the
+          # Actions runner.
+          sql-harness web --port 18765 --no-open &
+          SQL_H_PID=$!
+          sleep 2
+          curl -fsS http://127.0.0.1:18765/ -o /tmp/sqlh_index.html
+          curl -fsS http://127.0.0.1:18765/api/health
+          grep -q '<div id="root">' /tmp/sqlh_index.html
+          grep -Eq '/static/assets/.*\.(js|css)' /tmp/sqlh_index.html
+          echo "web SPA + API smoke OK"
+          kill $SQL_H_PID 2>/dev/null || true
           uv tool uninstall sql-harness
 
       - name: Publish to PyPI
@@ -103,8 +144,10 @@ jobs:
           [ "$CODE" = "200" ] || { echo "::error::sql-harness $VER not visible on PyPI after retries (last HTTP $CODE)"; exit 1; }
           echo "sql-harness $VER is live on PyPI: https://pypi.org/project/sql-harness/$VER/"
 
-  # Runs on every push to master as well (via workflow_dispatch for now, or
-  # manually) — kept minimal: just the test suite as a fast feedback loop.
+  # Manual test job — runnable via `gh workflow run publish` (workflow_dispatch).
+  # Kept minimal: npm build (so SPA exists) + the test suite as a fast
+  # feedback loop. The full publish job also runs unit tests as part of
+  # its flow.
   test:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
@@ -113,6 +156,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
       - run: pip install uv
+      - name: Build the SPA
+        run: cd web && npm ci && npm run build
       - name: Run unit tests
         run: uv run pytest tests/unit -v
