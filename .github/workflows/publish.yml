@@ -105,7 +105,13 @@ jobs:
           curl -fsS http://127.0.0.1:18765/ -o /tmp/sqlh_index.html
           curl -fsS http://127.0.0.1:18765/api/health
           grep -q '<div id="root">' /tmp/sqlh_index.html
-          grep -Eq '/static/assets/.*\.(js|css)' /tmp/sqlh_index.html
+          # Vite base is /static/, hashed chunks sit at _web_assets/ root:
+          # the shell references /static/index-<hash>.js|css (+ lazy chunks).
+          grep -Eq '/static/[A-Za-z0-9_-]+\.(js|css)' /tmp/sqlh_index.html
+          # And the hashed chunk itself must be fetchable (immutable cache).
+          CHUNK=$(grep -Eo '/static/[A-Za-z0-9_-]+\.js' /tmp/sqlh_index.html | head -1)
+          curl -fsSI "http://127.0.0.1:18765$CHUNK" | grep -qi "200 OK"
+          curl -fsSI "http://127.0.0.1:18765$CHUNK" | grep -qi "immutable"
           echo "web SPA + API smoke OK"
           kill $SQL_H_PID 2>/dev/null || true
           uv tool uninstall sql-harness
