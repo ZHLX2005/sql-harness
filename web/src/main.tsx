@@ -1,6 +1,5 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { HashRouter } from "react-router-dom";
 import { Toaster } from "sonner";
 import App from "./App";
 import { Providers } from "./lib/providers";
@@ -23,10 +22,8 @@ if (!rootEl) throw new Error("missing #root element");
 createRoot(rootEl).render(
   <StrictMode>
     <Providers>
-      <HashRouter>
-        <App />
-        <Toaster richColors position="bottom-right" />
-      </HashRouter>
+      <App />
+      <Toaster richColors position="bottom-right" />
     </Providers>
   </StrictMode>,
 );

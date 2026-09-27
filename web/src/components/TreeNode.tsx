@@ -6,23 +6,28 @@ import DocContextMenu from "./DocContextMenu";
 type Props = {
   node: TreeNodeT;
   rootId: string;
+  /** Path of this node relative to the root, built by joining segments ("a/b/c.md"). */
+  relPath: string;
   depth: number;
   onPick: (path: string) => void;
 };
 
 /**
- * Recursive tree node. Folders use native <details>/<summary> for instant
- * expand/collapse with zero JS state. Singletons (a single file rendered as
- * a "root", like SKILL.md) render as a single clickable row.
+ * Recursive tree node. Mirrors the backend contract from webapp.build_tree():
+ *   - files:  { name, path, type: "file", kind: "md"|..., editable }
+ *   - dirs:   { name, path, type: "dir", children }
+ *   - links:  { name, path, type: "link", children }
  *
- * Right-click on any row opens a Radix ContextMenu — see DocContextMenu.
+ * `path` on each node is only the last segment, so the full root-relative path
+ * is assembled here (parent relPath + "/" + name) — same as the legacy app.js
+ * renderNodes(prefix) logic. Folders use native <details>/<summary>; every row
+ * gets a Radix ContextMenu (rename/delete on files, create on folders).
  */
-export default function TreeNode({ node, rootId, depth, onPick }: Props) {
+export default function TreeNode({ node, rootId, relPath, depth, onPick }: Props) {
   const [open, setOpen] = useState(depth < 1);
-  const isFolder = node.kind === "folder" && node.children && node.children.length > 0;
-  const isFile = node.kind === "file" || node.kind === "singleton";
 
-  if (isFolder) {
+  if (node.type === "dir" || node.type === "link") {
+    const childRel = (parent: string, name: string) => (parent ? `${parent}/${name}` : name);
     return (
       <ContextMenu.Root>
         <ContextMenu.Trigger asChild>
@@ -32,11 +37,12 @@ export default function TreeNode({ node, rootId, depth, onPick }: Props) {
               <span className="name">{node.name}</span>
             </summary>
             <ul>
-              {node.children!.map((child) => (
+              {(node.children ?? []).map((child) => (
                 <li key={child.path || child.name}>
                   <TreeNode
                     node={child}
                     rootId={rootId}
+                    relPath={childRel(relPath, child.name)}
                     depth={depth + 1}
                     onPick={onPick}
                   />
@@ -45,33 +51,29 @@ export default function TreeNode({ node, rootId, depth, onPick }: Props) {
             </ul>
           </details>
         </ContextMenu.Trigger>
-        <DocContextMenu rootId={rootId} folderPath={node.path} />
+        <DocContextMenu rootId={rootId} folderPath={relPath} />
       </ContextMenu.Root>
     );
   }
 
-  if (isFile) {
-    const path = node.path || node.name;
-    return (
-      <ContextMenu.Root>
-        <ContextMenu.Trigger asChild>
-          <button
-            type="button"
-            className="leaf"
-            style={{ paddingLeft: 8 + depth * 14 }}
-            onClick={(e: MouseEvent) => {
-              e.preventDefault();
-              onPick(path);
-            }}
-          >
-            <span className="name">{node.name}</span>
-          </button>
-        </ContextMenu.Trigger>
-        <DocContextMenu rootId={rootId} filePath={path} fileName={node.name} />
-      </ContextMenu.Root>
-    );
-  }
-
-  // Unknown — render nothing
-  return null;
+  // type === "file"
+  return (
+    <ContextMenu.Root>
+      <ContextMenu.Trigger asChild>
+        <button
+          type="button"
+          className="leaf"
+          style={{ paddingLeft: 8 + depth * 14 }}
+          onClick={(e: MouseEvent) => {
+            e.preventDefault();
+            onPick(relPath);
+          }}
+          title={node.kind === "other" ? "不支持预览的文件类型" : undefined}
+        >
+          <span className="name">{node.name}</span>
+        </button>
+      </ContextMenu.Trigger>
+      <DocContextMenu rootId={rootId} filePath={relPath} fileName={node.name} />
+    </ContextMenu.Root>
+  );
 }

@@ -1,10 +1,18 @@
 import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import { useAppState } from "../lib/state";
 import TreeNode from "./TreeNode";
 import HelpDialog from "./HelpDialog";
 import logoUrl from "../assets/logo.png";
+
+/** Navigate by hash. App.tsx listens on hashchange and opens the doc. */
+export function gotoDoc(root: string, path: string) {
+  const enc = path
+    .split("/")
+    .map(encodeURIComponent)
+    .join("/");
+  window.location.hash = `#/${encodeURIComponent(root)}/${enc}`;
+}
 
 /**
  * Left rail: brand → search → tree → footer (theme + help + read-only chip).
@@ -16,7 +24,6 @@ import logoUrl from "../assets/logo.png";
  */
 export default function Sidebar() {
   const { state, openDoc } = useAppState();
-  const navigate = useNavigate();
   const [filter, setFilter] = useState("");
   const [results, setResults] = useState<Array<{ root: string; path: string; name: string }>>([]);
   const [searching, setSearching] = useState(false);
@@ -75,7 +82,7 @@ export default function Sidebar() {
                 onClick={() => {
                   setResults([]);
                   setFilter("");
-                  navigate(`#/${encodeURIComponent(r.root)}/${r.path}`);
+                  gotoDoc(r.root, r.path);
                   void openDoc(r.root, r.path);
                 }}
               >
@@ -98,22 +105,27 @@ export default function Sidebar() {
           <p className="err">加载失败:{state.loadError}</p>
         ) : (
           filteredRoots.map((root) => (
-            <TreeNode
-              key={root.id}
-              node={{
-                name: root.label,
-                path: "",
-                kind: "folder",
-                editable: root.editable,
-                children: root.tree,
-              }}
-              rootId={root.id}
-              depth={0}
-              onPick={(path) => {
-                navigate(`#/${encodeURIComponent(root.id)}/${path}`);
-                void openDoc(root.id, path);
-              }}
-            />
+            <section key={root.id} className="root-group">
+              <header className="root-title">
+                <span>{root.label}</span>
+                {root.connection ? <span className="badge">{root.connection}</span> : null}
+                {!root.editable ? <span className="badge">只读</span> : null}
+                <span className="count">{String(root.file_count)}</span>
+              </header>
+              {root.tree.map((child) => (
+                <TreeNode
+                  key={child.path || child.name}
+                  node={child}
+                  rootId={root.id}
+                  relPath={child.name}
+                  depth={0}
+                  onPick={(path) => {
+                    gotoDoc(root.id, path);
+                    void openDoc(root.id, path);
+                  }}
+                />
+              ))}
+            </section>
           ))
         )}
       </nav>

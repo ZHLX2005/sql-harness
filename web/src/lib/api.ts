@@ -106,13 +106,33 @@ export type DocRootSummary = {
 
 export type TreePayload = { version: string; roots: DocRootSummary[] };
 
-export type TreeNode = {
+export type TreeNodeFile = {
+  name: string;
+  /** Last path segment only — the full path is built by joining segments down the tree. */
+  path: string;
+  type: "file";
+  /** File-extension class: "md" | "py" | "toml" | "other". NOT the node type. */
+  kind: "md" | "py" | "toml" | "other" | string;
+  size: number;
+  mtime: number;
+  editable: boolean;
+};
+
+export type TreeNodeDir = {
   name: string;
   path: string;
-  kind: "file" | "folder" | "singleton";
-  editable: boolean;
-  children?: TreeNode[];
+  type: "dir";
+  children: TreeNode[];
 };
+
+export type TreeNodeLink = {
+  name: string;
+  path: string;
+  type: "link";
+  children: TreeNode[];
+};
+
+export type TreeNode = TreeNodeFile | TreeNodeDir | TreeNodeLink;
 
 export type DocPayload = {
   root: string;

@@ -28,11 +28,18 @@ export default function App() {
   const { openDoc, state, closeDoc, setEditing } = useAppState();
 
   useEffect(() => {
-    // #/<root>/<path> → openDoc(root, path); "" or "#/" → closeDoc
+    // #/<root>/<path…> → openDoc(root, path); "" or "#/" → closeDoc.
+    // Each path segment is URL-encoded individually (gotoDoc), so decode
+    // per-segment — decodeURIComponent on the whole string would break
+    // filenames containing a literal "%2F".
     const m = hash.match(/^#\/([^/]+)\/(.+)$/);
     if (m) {
       const [, root, path] = m;
-      void openDoc(decodeURIComponent(root), path);
+      const decoded = path
+        .split("/")
+        .map((seg) => decodeURIComponent(seg))
+        .join("/");
+      void openDoc(decodeURIComponent(root), decoded);
     } else {
       closeDoc();
     }
