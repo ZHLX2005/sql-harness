@@ -46,6 +46,13 @@ default = true
 # Mirrors browser-harness's setuptools src-layout. The package source is
 # under `src/sql_harness/`; the package name (top-level import) is `sql_harness`.
 packages = ["src/sql_harness"]
+# The Vite-built SPA (src/sql_harness/_web_assets/) is gitignored — it is a
+# build artifact regenerated from web/ by `npm run build` (locally or in CI,
+# before `uv build`). hatchling respects .gitignore when collecting package
+# files, so the SPA is pulled into the wheel via the force-include map below
+# (force-include bypasses VCS/ignore filtering). If the SPA has not been
+# built, hatchling fails with "Forced include not found" — run
+# `cd web && npm ci && npm run build` first.
 
 [tool.hatch.build.targets.wheel.force-include]
 # Bundle the full skill docs into the wheel so `sql-harness skill install`
@@ -58,6 +65,18 @@ packages = ["src/sql_harness"]
 "SKILL.md" = "sql_harness/_skills/SKILL.md"
 "interaction-skills" = "sql_harness/_skills/interaction-skills"
 "agent-workspace/zones/meta/skills" = "sql_harness/_skills/zones-meta-skills"
+# Vite SPA output (gitignored build artifact — see note above). One mapping
+# per emitted file shape; hashed names change every build, so we map the
+# whole directory: source dir → same path inside the package.
+"src/sql_harness/_web_assets" = "sql_harness/_web_assets"
+
+# uv build creates the wheel FROM the sdist, so the SPA must also be present
+# in the sdist tree — and at the SAME relative path (src/sql_harness/...) the
+# wheel-stage mapping expects as its source. Otherwise the wheel-stage
+# force-include resolves against the unpacked sdist temp dir and fails with
+# "Forced include not found".
+[tool.hatch.build.targets.sdist.force-include]
+"src/sql_harness/_web_assets" = "src/sql_harness/_web_assets"
 
 [tool.pytest.ini_options]
 # Mirrors browser-harness's `pythonpath = ["src"]` — tests import `sql_harness`

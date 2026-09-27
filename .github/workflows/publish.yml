@@ -74,14 +74,16 @@ jobs:
       - name: Verify wheel bundles the SPA
         run: |
           set -e
-          python -c "
+          VER=$(grep -E '^version = ' pyproject.toml | sed -E 's/^version = "([^"]+)"/\1/')
+          python - <<EOF
           import zipfile
-          with zipfile.ZipFile('dist/sql_harness-$(grep -E '^version = ' pyproject.toml | sed -E 's/^version = \"([^\"]+)\"/\1/')-py3-none-any.whl') as z:
+          with zipfile.ZipFile('dist/sql_harness-$VER-py3-none-any.whl') as z:
               names = z.namelist()
-              assert any(n.startswith('sql_harness/_web_assets/') for n in names), names
-              assert any(n.startswith('sql_harness/_web_assets/assets/') for n in names), names
-              print('wheel bundle OK, _web_assets present')
-          "
+              assert any(n == 'sql_harness/_web_assets/index.html' for n in names), 'index.html missing'
+              assert any(n.startswith('sql_harness/_web_assets/index-') and n.endswith('.js') for n in names), 'hashed JS missing'
+              assert any(n.startswith('sql_harness/_web_assets/index-') and n.endswith('.css') for n in names), 'hashed CSS missing'
+              print('wheel bundle OK:', len(names), 'entries, SPA present')
+          EOF
 
       - name: Smoke test the wheel (install as a user would)
         run: |
