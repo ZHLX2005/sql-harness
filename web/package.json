@@ -1,6 +1,6 @@
 {
   "name": "sql-harness-web",
-  "version": "0.3.9",
+  "version": "0.3.10",
   "private": true,
   "description": "Web UI for sql-harness (React + Vite, bundled into the Python wheel)",
   "type": "module",
